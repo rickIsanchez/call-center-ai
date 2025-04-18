@@ -11,11 +11,14 @@ image_version := main
 # App location
 # Warning: Some regions may not support all services (e.g. OpenAI models, AI Search) or capabilities (e.g. Cognitive Services TTS voices). Those regions have been tested and are known to work. If you encounter issues, please refer to the Azure documentation for the latest information, or try deploying with default locations.
 cognitive_communication_location := westeurope
-default_location := swedencentral
+default_location := westeurope
 openai_location := swedencentral
 search_location := francecentral
+
 # Sanitize variables
 name_sanitized := $(shell echo $(name) | tr '[:upper:]' '[:lower:]')
+# Kürzere Namen für Workspace-Ressourcen
+instanceShort := $(shell echo $(name) | tr '[:upper:]' '[:lower:]' | cut -c1-12 | sed 's/-//g')
 # App configuration
 twilio_phone_number ?= $(shell cat config.yaml | yq '.sms.twilio.phone_number')
 # Bicep inputs
@@ -147,6 +150,7 @@ deploy-bicep:
 			'cognitiveCommunicationLocation=$(cognitive_communication_location)' \
 			'imageVersion=$(image_version)' \
 			'instance=$(name)' \
+			'instanceShort=$(instanceShort)' \
 			'openaiLocation=$(openai_location)' \
 			'promptContentFilter=$(prompt_content_filter)' \
 			'searchLocation=$(search_location)' \
@@ -189,7 +193,7 @@ copy-public:
 	@echo "📦 Copying public resources..."
 	az storage blob upload-batch \
 		--account-name $(name_sanitized) \
-		--auth-mode login \
+		--auth-mode key \
 		--destination '$$web' \
 		--no-progress \
 		--output none \
@@ -216,3 +220,94 @@ sync-local-config:
 			--output-format=yaml \
 			--prettyPrint \
 		> config.yaml
+
+new-deploy:
+	@echo "🔄 Starte neues Deployment für $(name)..."
+	$(MAKE) clean-deployment name=$(name)
+	$(MAKE) deploy name=$(name)
+
+clean-deployment:
+	@echo "❗️ Löschen des fehlgeschlagenen Deployments: $(name)..."
+	az deployment sub delete --name $(name_sanitized) || true
+	
+	@echo "❗️ Löschen aller Ressourcen außer Resource Group und Communication Service..."
+	
+	@echo "Suche und lösche alle Container Apps vor den Environments..."
+	@for env in $$(az containerapp env list --query "[?location=='West Europe'].{name:name, resourceGroup:resourceGroup}" --output tsv); do \
+		env_name=$$(echo $$env | awk '{print $$1}'); \
+		rg_name=$$(echo $$env | awk '{print $$2}'); \
+		echo "Suche Container Apps in Environment: $$env_name in Resource Group: $$rg_name"; \
+		for app in $$(az containerapp list --resource-group $$rg_name --query "[?contains(properties.environmentId, '$$env_name')].name" --output tsv); do \
+			echo "Lösche Container App: $$app in Resource Group: $$rg_name"; \
+			az containerapp delete --name $$app --resource-group $$rg_name --yes || true; \
+		done; \
+		echo "Lösche Container App Environment: $$env_name in Resource Group: $$rg_name"; \
+		az containerapp env delete --name $$env_name --resource-group $$rg_name --yes || true; \
+	done
+	
+	@echo "Lösche Action Group..."
+	az monitor action-group delete --name $(instanceShort)-action-group --resource-group $(name_sanitized) || true
+	
+	@echo "Lösche Smart Detection Settings..."
+	# Command 'smart-detection' ist nicht verfügbar, daher auskommentiert
+	# az monitor app-insights smart-detection update --resource-group $(name_sanitized) --app-name $(instanceShort) --smart-detection-rule-name failureAnomaliesRule --enabled false || true
+	
+	@echo "Lösche App Configuration..."
+	az appconfig delete --name $(instanceShort) --resource-group $(name_sanitized) --yes || true
+	@echo "Purge App Configuration..."
+	az appconfig purge --name $(instanceShort) --location $(default_location) || true
+	
+	@echo "Lösche Storage Account..."
+	az storage account delete --name $(instanceShort) --resource-group $(name_sanitized) --yes || true
+	
+	@echo "Lösche Container App..."
+	az containerapp delete --name call-center-ai --resource-group $(name_sanitized) || true
+	
+	@echo "Lösche Container App Environment..."
+	az containerapp env delete --name $(instanceShort) --resource-group $(name_sanitized) --yes || true
+	
+	@echo "Lösche Cognitive Services OpenAI..."
+	az cognitiveservices account delete --name $(instanceShort)-$(openai_location)-openai --resource-group $(name_sanitized) || true
+	@echo "Purge Cognitive Services OpenAI (endgültige Löschung)..."
+	az cognitiveservices account purge --location $(openai_location) --resource-group $(name_sanitized) --name $(instanceShort)-$(openai_location)-openai || true
+	
+	@echo "Lösche Cognitive Services Communication..."
+	az cognitiveservices account delete --name $(instanceShort)-$(cognitive_communication_location)-communication --resource-group $(name_sanitized) || true
+	@echo "Purge Cognitive Services Communication (endgültige Löschung)..."
+	az cognitiveservices account purge --location $(cognitive_communication_location) --resource-group $(name_sanitized) --name $(instanceShort)-$(cognitive_communication_location)-communication || true
+	
+	@echo "Lösche Cognitive Services Translate..."
+	az cognitiveservices account delete --name $(instanceShort)-$(default_location)-translate --resource-group $(name_sanitized) || true
+	@echo "Purge Cognitive Services Translate (endgültige Löschung)..."
+	az cognitiveservices account purge --location $(default_location) --resource-group $(name_sanitized) --name $(instanceShort)-$(default_location)-translate || true
+	
+	# Communication Service wird NICHT gelöscht, da es manuell erstellt werden muss
+	# @echo "Lösche Communication Services..."
+	# az communication service delete --name $(name_sanitized) --resource-group $(name_sanitized) || true
+	
+	@echo "Lösche AI Foundry Workspace..."
+	az ml workspace delete --name $(instanceShort)-ai-foundry --resource-group $(name_sanitized) || true
+	
+	@echo "Lösche AI Project Workspace..."
+	az ml workspace delete --name call-center-ai --resource-group $(name_sanitized) || true
+	
+	@echo "Lösche Azure AI Hub..."
+	# Command 'ai hub' ist nicht verfügbar, daher auskommentiert
+	# az ai hub delete --name $(instanceShort) --resource-group $(name_sanitized) || true
+	
+	@echo "Lösche Search Service..."
+	az search service delete --name $(instanceShort) --resource-group $(name_sanitized) --yes || true
+	
+	@echo "Lösche Cosmos DB..."
+	az cosmosdb delete --name $(instanceShort) --resource-group $(name_sanitized) --yes || true
+	
+	@echo "Lösche Redis Cache..."
+	az redis delete --name $(instanceShort) --resource-group $(name_sanitized) --yes || true
+	
+	@echo "Lösche Application Insights..."
+	az monitor app-insights component delete --app $(instanceShort) --resource-group $(name_sanitized) || true
+	
+	@echo "Lösche Log Analytics Workspace..."
+	az monitor log-analytics workspace delete --workspace-name $(instanceShort) --resource-group $(name_sanitized) --yes || true
+	
+	@echo "✅ Bereinigung abgeschlossen. Du kannst jetzt erneut deployen."

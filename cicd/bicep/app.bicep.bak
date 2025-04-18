@@ -5,8 +5,6 @@ param embeddingModel string
 param embeddingQuota int
 param embeddingVersion string
 param imageVersion string
-param instance string
-param instanceShort string
 param llmFastContext int
 param llmFastDeploymentType string
 param llmFastModel string
@@ -24,7 +22,7 @@ param searchLocation string
 param tags object
 
 var appName = 'call-center-ai'
-var prefix = instanceShort
+var prefix = deployment().name
 var appUrl = 'https://call-center-ai.${acaEnv.properties.defaultDomain}'
 var llmFastModelFullName = toLower('${llmFastModel}-${llmFastVersion}')
 var llmSlowModelFullName = toLower('${llmSlowModel}-${llmSlowVersion}')
@@ -407,8 +405,7 @@ resource assignmentContainerAppQueueContributor 'Microsoft.Authorization/roleAss
 }
 
 resource communicationServices 'Microsoft.Communication/CommunicationServices@2023-06-01-preview' existing = {
-  name: '${instance}'
-  scope: resourceGroup('${instance}')
+  name: prefix
 }
 
 resource eventgridTopic 'Microsoft.EventGrid/systemTopics@2024-06-01-preview' = {
@@ -552,7 +549,7 @@ resource cognitiveCommunication 'Microsoft.CognitiveServices/accounts@2024-06-01
   }
 }
 
-var aiFoundryName = '${prefix}-ai-foundry'
+var aiFoundryName = '${prefix}-${openaiLocation}-foundry'
 
 resource aiFoundry 'Microsoft.MachineLearningServices/workspaces@2024-10-01' = {
   name: aiFoundryName

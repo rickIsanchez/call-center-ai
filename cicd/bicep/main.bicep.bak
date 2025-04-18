@@ -6,16 +6,15 @@ param embeddingQuota int = 50
 param embeddingVersion string = '1'
 param imageVersion string = 'main'
 param instance string
-param instanceShort string
 param llmFastContext int = 128000
 param llmFastDeploymentType string = 'GlobalStandard' // Pay-as-you-go in all regions
 param llmFastModel string = 'gpt-4o-mini'
-param llmFastQuota int = 100
+param llmFastQuota int = 150
 param llmFastVersion string = '2024-07-18'
 param llmSlowContext int = 128000
 param llmSlowDeploymentType string = 'GlobalStandard' // Pay-as-you-go in all regions
 param llmSlowModel string = 'gpt-4o'
-param llmSlowQuota int = 10
+param llmSlowQuota int = 50
 param llmSlowVersion string = '2024-08-06'
 param location string = deployment().location
 param openaiLocation string
@@ -54,8 +53,6 @@ module app 'app.bicep' = {
     embeddingQuota: embeddingQuota
     embeddingVersion: embeddingVersion
     imageVersion: imageVersion
-    instance: instance
-    instanceShort: instanceShort
     llmFastContext: llmFastContext
     llmFastDeploymentType: llmFastDeploymentType
     llmFastModel: llmFastModel
